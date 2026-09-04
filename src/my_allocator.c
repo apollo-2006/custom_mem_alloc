@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define ARENA_SIZE (1024 * 1024) // Pre-allocate a 1MB virtual memory pool
 
@@ -42,7 +43,7 @@ static BlockHeader* find_free_block(size_t size) {
 
 // Splits a large block into the requested size and a remaining smaller free block
 static void split_block(BlockHeader* block, size_t size) {
-    // Only split if the remainder can holding a header and at least 8 bytes of data
+    // Only split if the remainder can hold a header and at least 8 bytes of payload
     if (block->size >= size + HEADER_SIZE + ALIGNMENT) {
         BlockHeader* new_block = (BlockHeader*)((char*)block + HEADER_SIZE + size);
         new_block->size = block->size - size - HEADER_SIZE;
@@ -104,6 +105,10 @@ void my_free(void* ptr) {
 }
 
 void* my_calloc(size_t num, size_t size) {
+    // Reject requests whose size would wrap around, which would otherwise hand
+    // back a block far smaller than the caller asked for
+    if (num != 0 && size > SIZE_MAX / num) return NULL;
+
     size_t total = num * size;
     void* ptr = my_malloc(total);
     if (ptr) {

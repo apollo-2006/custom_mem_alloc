@@ -20,7 +20,7 @@ void* my_malloc(size_t size);
 void  my_free(void* ptr);
 void* my_calloc(size_t num, size_t size);
 
-// Debugging utility to demonstrate system mechanics during interviews
+// Debugging utility: dumps every block in the arena with its size and state
 void  print_heap_metadata(void);
 
 #endif // MY_ALLOCATOR_H
