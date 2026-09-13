@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>custom_mem_alloc · a malloc you can watch</title>
+  <meta name="description" content="A first-fit mmap allocator written in C, compiled to WebAssembly, with its block list drawn live.">
+  <link rel="stylesheet" href="demo.css">
+  <style>
+    .map { position: relative; height: 64px; background: var(--bg-sunk); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .blk { position: absolute; top: 0; bottom: 0; border-right: 1px solid var(--bg); }
+    .blk.used { background: var(--accent); }
+    .blk.used.sel { background: var(--accent-warm); }
+    .blk.free { background: rgba(127, 209, 168, 0.18); }
+    .blk.hdr { background: #3a4a5e; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
+    .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+    table tr.sel td { color: var(--accent-warm); }
+    table button { padding: 1px 8px; font-size: 0.75rem; }
+    .scale { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); margin-top: 4px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div>
+      <p class="eyebrow">custom_mem_alloc · C compiled to WebAssembly</p>
+      <h1>A malloc you can watch</h1>
+      <p class="lede">Every button calls the real <span class="mono">my_malloc</span>, <span class="mono">my_calloc</span> or
+        <span class="mono">my_free</span> from <span class="mono">src/my_allocator.c</span>. The map is redrawn from the
+        allocator's own <span class="mono">print_heap_metadata()</span> after each call.</p>
+    </div>
+    <nav class="links">
+      <a href="https://github.com/apollo-2006/custom_mem_alloc">source</a>
+      <a href="https://abirdeol.tech/research/allocator">post-mortem</a>
+    </nav>
+  </header>
+
+  <section class="panel wide" style="margin-bottom:16px">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <h2 style="margin:0">The 1 MB arena <span id="zoomLabel" class="muted"></span></h2>
+      <div class="row">
+        <label class="small muted" for="zoom">show first</label>
+        <select id="zoom">
+          <option value="16384">16 KB</option>
+          <option value="65536" selected>64 KB</option>
+          <option value="262144">256 KB</option>
+          <option value="1048576">1 MB</option>
+        </select>
+      </div>
+    </div>
+    <div class="map" id="map" aria-label="Arena block map"></div>
+    <div class="scale"><span>arena start</span><span id="scaleEnd"></span></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>allocated payload</span>
+      <span><i style="background:var(--accent-warm)"></i>selected</span>
+      <span><i style="background:rgba(127,209,168,.35)"></i>free</span>
+      <span><i style="background:#3a4a5e"></i><span id="hdrLegend">header</span></span>
+    </div>
+    <div class="stats" style="margin-top:14px">
+      <div class="stat"><b id="sUsed">0</b><span>bytes allocated</span></div>
+      <div class="stat"><b id="sFree">0</b><span>bytes free</span></div>
+      <div class="stat"><b id="sLargest">0</b><span>largest free block</span></div>
+      <div class="stat"><b id="sBlocks">0</b><span>blocks</span></div>
+      <div class="stat"><b id="sFrag">0%</b><span>fragmentation</span></div>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Allocate</h2>
+      <div class="row" style="margin-bottom:10px">
+        <input id="size" type="number" min="1" value="200" style="width:110px" aria-label="size in bytes">
+        <button id="malloc">my_malloc</button>
+        <button id="calloc" class="ghost">my_calloc</button>
+      </div>
+      <div class="row" style="margin-bottom:10px">
+        <button id="churn" class="ghost">random churn ×200</button>
+        <button id="frag" class="ghost">fragment it</button>
+        <button id="freeAll" class="ghost">free everything</button>
+      </div>
+      <h2 style="margin-top:14px">Misuse</h2>
+      <p class="small muted" style="margin:0 0 8px">These abort, exactly as they do natively. The page then restarts the module, the way a crashed process would be restarted.</p>
+      <div class="row">
+        <button id="dbl" class="warm">double free</button>
+        <button id="interior" class="warm">free an interior pointer</button>
+        <button id="huge" class="ghost">my_malloc(SIZE_MAX)</button>
+      </div>
+      <pre class="log" id="log" style="margin-top:12px;max-height:200px"></pre>
+    </section>
+
+    <section class="panel">
+      <h2>Live pointers</h2>
+      <div class="table-wrap" style="max-height:340px;overflow:auto">
+        <table><thead><tr><th>pointer</th><th>requested</th><th>block</th><th></th></tr></thead><tbody id="ptrs"></tbody></table>
+      </div>
+      <p class="small muted" id="noPtrs">nothing allocated</p>
+    </section>
+
+    <section class="panel">
+      <h2>Benchmark, inside WebAssembly</h2>
+      <p class="small muted" style="margin:0 0 10px">The workload from <span class="mono">bench/workload.h</span>: random allocate and free across 256 slots, every block filled and verified before it is freed. Compared against Emscripten's own malloc.</p>
+      <div class="row" style="margin-bottom:10px">
+        <select id="bops"><option value="200000">200k ops</option><option value="1000000" selected>1M ops</option></select>
+        <select id="bmax"><option value="256">sizes ≤ 256</option><option value="4096" selected>sizes ≤ 4096</option></select>
+        <button id="bench">run</button>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>allocator</th><th>ns / op</th><th>M ops / s</th><th>failed</th></tr></thead><tbody id="bres"></tbody></table></div>
+    </section>
+  </div>
+
+  <footer>custom_mem_alloc by <a href="https://abirdeol.tech">Abir Deol</a></footer>
+</div>
+<script src="allocator.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

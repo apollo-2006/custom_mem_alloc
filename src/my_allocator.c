@@ -105,17 +105,33 @@ void my_free(void* ptr) {
         fprintf(stderr, "my_free(): double free of %p\n", ptr);
         abort();
     }
+
+    // Coalescing. The block list is in address order and every earlier free
+    // already merged its neighbours, so no two adjacent blocks are ever both
+    // free. That means only this block's two neighbours can need merging, and
+    // the walk can stop as soon as it reaches the block instead of passing over
+    // the whole arena on every free.
+    BlockHeader* prev = NULL;
+    BlockHeader* current = free_list_head;
+    while (current && current != block) {
+        prev = current;
+        current = current->next;
+    }
+    if (!current) {
+        // A header-shaped address inside the arena that is not on the list:
+        // a pointer into the middle of a block.
+        fprintf(stderr, "my_free(): pointer %p is not the start of a block\n", ptr);
+        abort();
+    }
     block->is_free = true;
 
-    // Coalescing phase: Merge contiguous free blocks to prevent fragmentation
-    BlockHeader* current = free_list_head;
-    while (current && current->next) {
-        if (current->is_free && current->next->is_free) {
-            current->size += HEADER_SIZE + current->next->size;
-            current->next = current->next->next;
-        } else {
-            current = current->next;
-        }
+    if (block->next && block->next->is_free) {
+        block->size += HEADER_SIZE + block->next->size;
+        block->next = block->next->next;
+    }
+    if (prev && prev->is_free) {
+        prev->size += HEADER_SIZE + block->size;
+        prev->next = block->next;
     }
 
     pthread_mutex_unlock(&allocator_mutex);

@@ -56,3 +56,6 @@ dkms.conf
 
 # Build output
 custom_allocator
+test_alloc
+bench_alloc
+web/dist/
