@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define ARENA_SIZE (1024 * 1024) // Pre-allocate a 1MB virtual memory pool
 
@@ -56,7 +57,10 @@ static void split_block(BlockHeader* block, size_t size) {
 }
 
 void* my_malloc(size_t size) {
-    if (size == 0) return NULL;
+    // Bound the request before ALIGN rounds it up. A size within 7 of SIZE_MAX
+    // wraps to 0 there, and a 0-byte request fits any free block, so
+    // my_malloc(SIZE_MAX) used to return a live pointer.
+    if (size == 0 || size > ARENA_SIZE - HEADER_SIZE) return NULL;
 
     size_t aligned_size = ALIGN(size);
 
@@ -88,6 +92,19 @@ void my_free(void* ptr) {
 
     // Shift pointer backward to locate the corresponding metadata block
     BlockHeader* block = (BlockHeader*)ptr - 1;
+
+    // Abort on a pointer this arena never handed out, or on a second free of the
+    // same block, the way glibc does. Carrying on would link a stray address into
+    // the free list, or merge a block that may already be reallocated.
+    char* arena = (char*)global_arena_start;
+    if (!arena || (char*)block < arena || (char*)ptr >= arena + ARENA_SIZE) {
+        fprintf(stderr, "my_free(): pointer %p not from this allocator\n", ptr);
+        abort();
+    }
+    if (block->is_free) {
+        fprintf(stderr, "my_free(): double free of %p\n", ptr);
+        abort();
+    }
     block->is_free = true;
 
     // Coalescing phase: Merge contiguous free blocks to prevent fragmentation

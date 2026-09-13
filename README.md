@@ -18,9 +18,12 @@ Written to find out what `malloc` is actually doing underneath.
   block large enough, then splits off the remainder as a new free block when the
   leftover can hold a header plus at least 8 bytes of payload.
 * **Coalescing on free.** `my_free` marks the block free and then merges neighbouring
-  free blocks, which keeps the arena from fragmenting into unusable slivers.
-* **8-byte alignment.** Every payload is rounded up to an 8-byte boundary so returned
-  pointers are suitably aligned for any primitive type.
+  free blocks, which keeps the arena from fragmenting into unusable slivers. Freeing a
+  pointer from outside the arena, or freeing a block twice before its memory is handed
+  out again, aborts with a message instead of corrupting the block list.
+* **8-byte alignment.** Every payload is rounded up to an 8-byte boundary, which covers
+  integers, pointers and `double`. It does not cover `long double` or SIMD types, which
+  want 16 bytes on x86-64 (`alignof(max_align_t)`), so this is not a drop-in `malloc`.
 * **Thread safety.** A single `pthread_mutex` guards the arena, so the allocator can be
   called from multiple threads without racing on the block list.
 
