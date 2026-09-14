@@ -10,5 +10,5 @@ emcc -O2 -Wall -Wextra -I../include \
   -sEXPORTED_FUNCTIONS=_my_malloc,_my_free,_my_calloc,_print_heap_metadata,_bench_run,_bench_failed,_bench_corrupt,_malloc,_free \
   -sEXPORTED_RUNTIME_METHODS=HEAPU8 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=33554432 \
   -o dist/allocator.js
-cp index.html app.js demo.css dist/
+cp index.html app.js demo.css og.jpg dist/
 echo "built web/dist"

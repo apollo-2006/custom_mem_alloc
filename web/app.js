@@ -43,7 +43,7 @@ function blocks() {
 }
 
 const hex = (n) => '0x' + n.toString(16);
-const kb = (n) => (n >= 10240 ? (n / 1024).toFixed(0) + ' KB' : n.toLocaleString());
+const kb = (n) => (n >= 10240 ? (n / 1024).toFixed(0) + ' KB' : n.toLocaleString() + ' B');
 
 function draw() {
   const list = blocks();
@@ -57,9 +57,10 @@ function draw() {
       const start = b.addr - base;
       if (b.free) { free += b.size; largest = Math.max(largest, b.size); } else used += b.size;
       if (start >= zoom) continue;
-      const put = (from, len, cls, title) => {
+      const put = (from, len, cls, title, ptr) => {
         const el = document.createElement('div');
         el.className = 'blk ' + cls;
+        if (ptr !== undefined) el.dataset.ptr = ptr;
         el.style.left = (from / zoom * 100) + '%';
         el.style.width = Math.max(0.08, len / zoom * 100) + '%';
         el.title = title;
@@ -68,7 +69,7 @@ function draw() {
       const payload = b.addr + HEADER;
       put(start, HEADER, 'hdr', `header at ${hex(b.addr)}`);
       put(start + HEADER, b.size, (b.free ? 'free' : 'used') + (payload === selected ? ' sel' : ''),
-        `${b.free ? 'free' : 'allocated'} ${b.size} bytes at ${hex(payload)}`);
+        `${b.free ? 'free' : 'allocated'} ${b.size} bytes at ${hex(payload)}`, b.free ? undefined : payload);
     }
   }
   $('sUsed').textContent = kb(used);
@@ -79,15 +80,35 @@ function draw() {
 
   const sizes = new Map(list.map((b) => [b.addr + HEADER, b.size]));
   const body = $('ptrs'); body.textContent = '';
+  // The fragmentation demo leaves ~500 live pointers; rendering them all makes
+  // every redraw slow for rows nobody scrolls to.
+  const MAX_ROWS = 200;
+  let shown = 0;
   for (const [ptr, req] of live) {
+    if (shown++ === MAX_ROWS) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td colspan="4" class="muted">and ${live.size - MAX_ROWS} more</td>`;
+      body.append(tr);
+      break;
+    }
     const tr = document.createElement('tr');
+    tr.dataset.ptr = ptr;
     if (ptr === selected) tr.className = 'sel';
     tr.innerHTML = `<td>${hex(ptr)}</td><td>${req}</td><td>${sizes.get(ptr) ?? '?'}</td><td><button>free</button></td>`;
-    tr.onmouseenter = () => { selected = ptr; draw(); };
+    tr.onmouseenter = () => select(ptr);
     tr.querySelector('button').onclick = () => doFree(ptr);
     body.append(tr);
   }
   $('noPtrs').hidden = live.size > 0;
+}
+
+// Hovering a row only moves the highlight; nothing about the heap changed, so
+// there is no reason to re-run print_heap_metadata and rebuild both views.
+function select(ptr) {
+  if (selected === ptr) return;
+  selected = ptr;
+  for (const tr of $('ptrs').children) tr.classList.toggle('sel', Number(tr.dataset.ptr) === ptr);
+  for (const el of $('map').children) el.classList.toggle('sel', Number(el.dataset.ptr) === ptr);
 }
 
 function doMalloc(size, fn = '_my_malloc') {
